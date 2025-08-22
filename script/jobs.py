@@ -93,9 +93,9 @@ if not jobs.empty:
 
     # save raw combined results (dates→str)
     records = jobs.where(jobs.notna(), None).to_dict(orient="records")
-    Path("/Users/hermann/Documents/personal-training/linkedin job/jobs_linkedin.json").write_text(
-        json.dumps(records, indent=4, ensure_ascii=False, default=str),
-        encoding="utf-8"
-    )
+    # Path("/Users/hermann/Documents/personal-training/linkedin job/jobs_linkedin.json").write_text(
+    #     json.dumps(records, indent=4, ensure_ascii=False, default=str),
+    #     encoding="utf-8"
+    # )
 else:
     tg_send("No jobs returned by JobSpy for the given keywords.")
