@@ -41,7 +41,7 @@ for kw in keywords:
         search_term=kw,          # ← iterate here
         location="Germany",
         results_wanted=10,
-        hours_old=48,
+        hours_old=1,
         country_indeed="Germany",
     )
     if not df_kw.empty:
