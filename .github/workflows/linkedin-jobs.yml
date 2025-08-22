@@ -1,9 +1,10 @@
+# .github/workflows/linkedin-jobs.yml
 name: linkedin-jobs-cron
 
 on:
   schedule:
-    - cron: "0 5-18 * * 1-5"   # every 30 minutes (UTC)
-  workflow_dispatch:          # allow manual runs from the Actions tab
+    - cron: "0 5-18 * * 1-5"   # every hour, Mon–Fri (UTC 05–18 → Tallinn 08–21)
+  workflow_dispatch:            # allow manual runs
 
 permissions:
   contents: read
@@ -15,7 +16,6 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,15 +29,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      # Optional: quick Telegram getChat to validate chat id (uncomment if needed)
-      # - name: Validate Telegram chat
-      #   env:
-      #     TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      #     TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      #   run: |
-      #     curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getChat?chat_id=${TELEGRAM_CHAT_ID}"
+          pip install -r script/requirements.txt
 
       - name: Run scraper
         env:
@@ -45,14 +37,13 @@ jobs:
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUNBUFFERED: "1"
         run: |
-          python scripts/jobs.py
+          python script/jobs.py
 
       - name: Upload JSON artifact (optional)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: linkedin-jobs-json
-          path: |
-            **/jobs_linkedin.json
+          path: jobs_linkedin.json
           if-no-files-found: ignore
           retention-days: 7
