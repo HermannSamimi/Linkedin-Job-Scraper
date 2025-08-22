@@ -1,0 +1,6 @@
+
+jobspy
+pandas
+numpy
+python-dotenv
+requests
