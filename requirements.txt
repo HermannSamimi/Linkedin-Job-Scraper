@@ -1,4 +1,4 @@
-jobspy
+python-jobspy
 pandas
 numpy
 python-dotenv
