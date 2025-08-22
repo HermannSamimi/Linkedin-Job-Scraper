@@ -3,8 +3,8 @@ name: linkedin-jobs-cron
 
 on:
   schedule:
-    - cron: "0 5-18 * * 1-5"   # every hour, Mon–Fri (UTC 05–18 → Tallinn 08–21)
-  workflow_dispatch:            # allow manual runs
+    - cron: "0 5-18 * * 1-5"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,7 +29,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r script/requirements.txt
+
+      - name: Show repo tree (debug)
+        run: |
+          pwd
+          ls -la
+          echo "---- script/ ----"
+          ls -la script || true
 
       - name: Run scraper
         env:
@@ -37,7 +44,7 @@ jobs:
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUNBUFFERED: "1"
         run: |
-          python scrip/jobs.py
+          python script/jobs.py
 
       - name: Upload JSON artifact (optional)
         if: always()
