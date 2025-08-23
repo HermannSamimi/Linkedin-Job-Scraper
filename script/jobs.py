@@ -1,30 +1,27 @@
-import os, re, json, time
-import numpy as np
+#!/usr/bin/env python3
+import os, re, time, requests
 import pandas as pd
 from jobspy import scrape_jobs
-from pathlib import Path
-import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
+CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")   # @channelusername OR -100xxxxxxxxxx
 
-def tg_send(text: str, disable_web_page_preview=True) -> None:
+def tg_send(text: str, disable_web_page_preview: bool = True) -> None:
     if not BOT_TOKEN or not CHAT_ID:
         raise RuntimeError("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars.")
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     r = requests.post(url, json={
         "chat_id": CHAT_ID,
-        "text": text,
+        "text": text,  # plain text (no Markdown headaches)
         "disable_web_page_preview": disable_web_page_preview,
     }, timeout=30)
     if not r.ok:
         raise RuntimeError(f"Telegram send failed: {r.status_code} {r.text}")
 
-# ── iterate keywords ──
-keywords = [
+KEYWORDS = [
     "data engineer",
     "machine learning engineer",
     "analytics engineer",
@@ -33,71 +30,93 @@ keywords = [
     "ml/ai engineer",
     "data backend engineer",
     "data backend",
-    "big data"
+    "big data",
 ]
+KW_LC = [k.lower() for k in KEYWORDS]
 
-all_jobs = []
-for kw in keywords:
-    df_kw = scrape_jobs(
-        site_name=["linkedin"],
-        search_term=kw,          # ← iterate here
-        location="Germany",
-        results_wanted=10,
-        hours_old=1,
-        country_indeed="Germany",
-    )
-    if not df_kw.empty:
-        df_kw = df_kw.copy()
-        df_kw["matched_keyword"] = kw
-        all_jobs.append(df_kw)
-    time.sleep(1)  # be polite / avoid bursts
+SEARCH_LOCATION = "Germany"
+RESULTS_WANTED_PER_TERM = 10
+HOURS_OLD = 1
 
-jobs = pd.concat(all_jobs, ignore_index=True) if all_jobs else pd.DataFrame()
-print(f"Found {len(jobs)} jobs across {len(keywords)} keywords")
+# Simple German-language markers to exclude
+GERMAN_PATTERNS = re.compile(
+    r"(m/w/d|w/m/d|d/m/w|gn|werkstudent|doktorand|praktikum|gesundheitswesen|entwicklung|technik|berater|"
+    r"ä|ö|ü|ß)",
+    re.IGNORECASE,
+)
 
-# ── filters: English-only titles ──
-def is_ascii(s: str) -> bool:
-    try:
-        (s or "").encode("ascii")
-        return True
-    except UnicodeEncodeError:
-        return False
+def main():
+    frames = []
 
-gender_marker_re = re.compile(r"\((?:m\/w\/d|w\/m\/d|d\/m\/w|gn\*?|all genders)\)", re.IGNORECASE)
+    for kw in KEYWORDS:
+        try:
+            df_kw = scrape_jobs(
+                site_name=["linkedin", "glassdoor", "indeed"],
+                search_term=kw,
+                location=SEARCH_LOCATION,
+                results_wanted=RESULTS_WANTED_PER_TERM,
+                hours_old=HOURS_OLD,
+                country_indeed="Germany",
+            )
+        except Exception as e:
+            print(f"[warn] scrape failed for '{kw}': {e}")
+            continue
 
-if not jobs.empty:
-    # keep only rows whose title contains ANY of the keywords (safety),
-    # though we already searched per keyword
-    patt = "|".join([f"\\b{re.escape(k.lower())}\\b" for k in keywords])
-    df = jobs[jobs["title"].str.lower().str.contains(patt, regex=True, na=False)]
+        if not df_kw.empty:
+            df_kw = df_kw.copy()
+            df_kw.columns = [str(c).strip().lower() for c in df_kw.columns]
+            df_kw["matched_keyword"] = kw
+            frames.append(df_kw)
 
-    df = df[df["title"].apply(is_ascii)]
-    df = df[~df["title"].str.contains(gender_marker_re, na=False)]
+        time.sleep(1)
 
-    # de-dup (prefer job_url, fallback to id)
+    if not frames:
+        print("No jobs returned by JobSpy for the given keywords.")
+        return
+
+    jobs = pd.concat(frames, ignore_index=True)
+
+    # 1) Drop obvious German-language titles
+    if "title" in jobs.columns:
+        jobs = jobs.loc[~jobs["title"].str.contains(GERMAN_PATTERNS, na=False)].copy()
+
+    # 2) Keep ONLY titles that contain ANY of the keywords (substring, case-insensitive)
+    if "title" in jobs.columns:
+        jobs = jobs[
+            jobs["title"].astype(str).str.lower().apply(lambda t: any(k in t for k in KW_LC))
+        ].copy()
+
+    # 3) Select only the fields you want to send
+    wanted_cols = ["title", "company", "location", "job_url", "site", "matched_keyword", "date_posted"]
+    present_cols = [c for c in wanted_cols if c in jobs.columns]
+    df = jobs[present_cols].reset_index(drop=True)
+
+    # 4) De-dup on URL if available, else on id (optional)
     if "job_url" in df.columns:
-        df = df.drop_duplicates(subset=["job_url"])
-    elif "id" in df.columns:
-        df = df.drop_duplicates(subset=["id"])
-    df = df.reset_index(drop=True)
+        df = df.drop_duplicates(subset=["job_url"]).reset_index(drop=True)
 
-    # ── send to Telegram ──
     if df.empty:
-        tg_send("No matching English job postings found.")
-    else:
-        for _, row in df.iterrows():
-            title    = str(row.get("title") or "")
-            company  = str(row.get("company") or "")
-            location = str(row.get("location") or "")
-            url      = str(row.get("job_url") or "")
-            kw       = str(row.get("matched_keyword") or "")
-            tg_send(f"{title}\n{company} — {location}\n{url}\n[{kw}]")
+        print("No matching English job postings found after filters.")
+        return
 
-    # save raw combined results (dates→str)
-    records = jobs.where(jobs.notna(), None).to_dict(orient="records")
-    # Path("/Users/hermann/Documents/personal-training/linkedin job/jobs_linkedin.json").write_text(
-    #     json.dumps(records, indent=4, ensure_ascii=False, default=str),
-    #     encoding="utf-8"
-    # )
-else:
-    tg_send("No jobs returned by JobSpy for the given keywords.")
+    # 5) Send each as a Telegram message (only these 7 fields)
+    for _, row in df.iterrows():
+        title   = str(row.get("title") or "")
+        company = str(row.get("company") or "")
+        loc     = str(row.get("location") or "")
+        url     = str(row.get("job_url") or "")
+        site    = str(row.get("site") or "")
+        kw      = str(row.get("matched_keyword") or "")
+        posted  = str(row.get("date_posted") or "")
+
+        msg = (
+            f"{title}\n"
+            f"{company} — {loc}\n"
+            f"Site: {site} | Keyword: {kw}\n"
+            f"Posted: {posted}\n"
+            f"{url}"
+        )
+        tg_send(msg)
+
+if __name__ == "__main__":
+    main()
