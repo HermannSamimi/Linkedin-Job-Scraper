@@ -51,7 +51,7 @@ def main():
     for kw in KEYWORDS:
         try:
             df_kw = scrape_jobs(
-                site_name=["linkedin", "glassdoor", "indeed"],
+                site_name=["linkedin"],
                 search_term=kw,
                 location=SEARCH_LOCATION,
                 results_wanted=RESULTS_WANTED_PER_TERM,
