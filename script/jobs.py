@@ -23,6 +23,9 @@ def tg_send(text: str, disable_web_page_preview: bool = True) -> None:
 
 KEYWORDS = [
     "data engineer",
+    "data",
+    "cloud platform",
+    "cloud engineer",
     "machine learning engineer",
     "analytics engineer",
     "ai engineer",
