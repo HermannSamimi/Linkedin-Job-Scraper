@@ -23,9 +23,6 @@ def tg_send(text: str, disable_web_page_preview: bool = True) -> None:
 
 KEYWORDS = [
     "data engineer",
-    "data",
-    "cloud platform",
-    "cloud engineer",
     "machine learning engineer",
     "analytics engineer",
     "ai engineer",
@@ -47,6 +44,55 @@ GERMAN_PATTERNS = re.compile(
     r"ä|ö|ü|ß)",
     re.IGNORECASE,
 )
+
+# ───────────────────────────────────────────────────────────
+# Blocked companies (case-insensitive, robust normalization)
+# ───────────────────────────────────────────────────────────
+blocked_companies = [
+    "adesso", "lumenalta", "enpal", "enigma", "cinemo",
+    "microsoft", "google", "amazon", "meta", "facebook", "apple", "audi"
+]
+
+# Normalize company names: lowercase, replace umlauts, strip punctuation,
+# remove common legal/entity suffixes, collapse spaces.
+_SUFFIX_WORDS = (
+    "se|ag|gmbh|kgaa|kg|ug|inc|llc|ltd|plc|bv|nv|oy|ab|sas|sa|srl|spa|co|company|"
+    "group|holdings|holding|co kg|co\\. kg|gmbh & co kg|gmbh und co kg"
+)
+_SUFFIX_RE = re.compile(rf"\b({_SUFFIX_WORDS})\b", flags=re.IGNORECASE)
+
+def _normalize_company(name: str) -> str:
+    if not name:
+        return ""
+    s = name.lower()
+    # Basic transliteration for common German chars (keep it lightweight)
+    s = (
+        s.replace("ä", "a")
+         .replace("ö", "o")
+         .replace("ü", "u")
+         .replace("ß", "ss")
+    )
+    # Replace punctuation with space
+    s = re.sub(r"[^a-z0-9\s&.]", " ", s)
+    # Remove common suffix words
+    s = _SUFFIX_RE.sub(" ", s)
+    # Remove leftover symbols like & or .
+    s = re.sub(r"[&.]", " ", s)
+    # Collapse whitespace
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+# Build normalized blocked patterns (word-boundary regex) for robust matching
+_norm_blocked = sorted({_normalize_company(b) for b in blocked_companies if _normalize_company(b)}, key=len, reverse=True)
+_blocked_regexes = [re.compile(rf"\b{re.escape(nb)}\b") for nb in _norm_blocked]
+
+def _is_blocked_company(name: str) -> bool:
+    n = _normalize_company(name)
+    if not n:
+        return False
+    # Exact word match against any normalized blocked token
+    return any(rx.search(n) for rx in _blocked_regexes)
+# ───────────────────────────────────────────────────────────
 
 def main():
     frames = []
@@ -98,11 +144,19 @@ def main():
     if "job_url" in df.columns:
         df = df.drop_duplicates(subset=["job_url"]).reset_index(drop=True)
 
+    # 5) Filter out blocked companies (robust, case-insensitive)
+    if "company" in df.columns:
+        before = len(df)
+        df = df[~df["company"].astype(str).apply(_is_blocked_company)].reset_index(drop=True)
+        after = len(df)
+        if after < before:
+            print(f"[info] filtered {before - after} postings from blocked companies")
+
     if df.empty:
         print("No matching English job postings found after filters.")
         return
 
-    # 5) Send each as a Telegram message (only these 7 fields)
+    # 6) Send each as a Telegram message
     for _, row in df.iterrows():
         title   = str(row.get("title") or "")
         company = str(row.get("company") or "")
